@@ -1,0 +1,6 @@
+project_id = "YOUR_SUPABASE_PROJECT_REF"
+
+[functions.gemini-proxy]
+# The function verifies Firebase ID tokens itself using Google's signing keys.
+# Keep this false so Supabase's platform JWT gate does not reject Firebase-issued JWTs.
+verify_jwt = false
