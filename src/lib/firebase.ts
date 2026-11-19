@@ -1,16 +1,15 @@
-
 import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithRedirect,
+  signInWithPopup,
   getRedirectResult,
   onAuthStateChanged,
   setPersistence,
   browserLocalPersistence,
   signOut,
   updateProfile,
-  type User
+  type User,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -26,7 +25,7 @@ import {
   deleteDoc,
   serverTimestamp,
   onSnapshot,
-  type Firestore
+  type Firestore,
 } from 'firebase/firestore';
 import { getSettings, isFirebaseReady } from './config';
 
@@ -41,37 +40,62 @@ export function getFirebase() {
   const settings = getSettings();
 
   if (!isFirebaseReady(settings)) {
-    throw new Error('Firebase belum dikonfigurasi. Lengkapi Firebase Web App config di Setup.');
+    throw new Error(
+      'Firebase belum dikonfigurasi. Lengkapi Firebase Web App config di Setup.',
+    );
   }
 
   if (!app) {
-    app = getApps().length ? getApp() : initializeApp(settings.firebase!);
+    app = getApps().length
+      ? getApp()
+      : initializeApp(settings.firebase!);
   }
 
   if (!db) {
     db = getFirestore(app);
   }
 
-  return { app, auth: getAuth(app), db };
+  return {
+    app,
+    auth: getAuth(app),
+    db,
+  };
 }
 
+/**
+ * Google sign-in menggunakan popup agar halaman utama tidak melakukan
+ * full redirect lalu kehilangan state auth di GitHub Pages.
+ *
+ * browserLocalPersistence membuat session Firebase tetap tersimpan
+ * setelah reload / perpindahan halaman selama browser mengizinkannya.
+ */
 export async function loginWithGoogle() {
   const { auth } = getFirebase();
 
   await setPersistence(auth, browserLocalPersistence);
 
   const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: 'select_account' });
+  provider.setCustomParameters({
+    prompt: 'select_account',
+  });
 
-  await signInWithRedirect(auth, provider);
+  const result = await signInWithPopup(auth, provider);
+
+  return result.user;
 }
 
+/**
+ * Tetap diekspor agar App.tsx lama yang masih memanggil fungsi ini
+ * tidak gagal build. Untuk flow popup normal, hasilnya biasanya null.
+ */
 export async function resolveGoogleRedirect() {
   const { auth } = getFirebase();
   return getRedirectResult(auth);
 }
 
-export function watchAuth(callback: (user: User | null) => void) {
+export function watchAuth(
+  callback: (user: User | null) => void,
+) {
   return onAuthStateChanged(getFirebase().auth, callback);
 }
 
@@ -79,7 +103,10 @@ export async function logout() {
   await signOut(getFirebase().auth);
 }
 
-export async function updateUserProfile(user: User, displayName: string) {
+export async function updateUserProfile(
+  user: User,
+  displayName: string,
+) {
   await updateProfile(user, { displayName });
 
   await setDoc(
@@ -88,74 +115,121 @@ export async function updateUserProfile(user: User, displayName: string) {
       displayName,
       email: user.email,
       photoURL: user.photoURL,
-      updatedAt: serverTimestamp()
+      updatedAt: serverTimestamp(),
     },
-    { merge: true }
+    { merge: true },
   );
 }
 
-export async function saveProfile(uid: string, data: Record<string, unknown>) {
+export async function saveProfile(
+  uid: string,
+  data: Record<string, unknown>,
+) {
   await setDoc(
     doc(getFirebase().db, 'users', uid),
-    { ...data, updatedAt: serverTimestamp() },
-    { merge: true }
+    {
+      ...data,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
   );
 }
 
 export async function loadProfile(uid: string) {
-  const snapshot = await getDoc(doc(getFirebase().db, 'users', uid));
+  const snapshot = await getDoc(
+    doc(getFirebase().db, 'users', uid),
+  );
+
   return snapshot.exists() ? snapshot.data() : {};
 }
 
-export async function createConversation(uid: string, title = 'New conversation') {
+export async function createConversation(
+  uid: string,
+  title = 'New conversation',
+) {
   const ref = await addDoc(
     collection(getFirebase().db, 'users', uid, 'conversations'),
     {
       title,
       createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    }
+      updatedAt: serverTimestamp(),
+    },
   );
 
   return ref.id;
 }
 
-export async function renameConversation(uid: string, id: string, title: string) {
+export async function renameConversation(
+  uid: string,
+  id: string,
+  title: string,
+) {
   await setDoc(
     doc(getFirebase().db, 'users', uid, 'conversations', id),
-    { title, updatedAt: serverTimestamp() },
-    { merge: true }
+    {
+      title,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
   );
 }
 
-export async function removeConversation(uid: string, id: string) {
+export async function removeConversation(
+  uid: string,
+  id: string,
+) {
   const msgs = await getDocs(
-    collection(getFirebase().db, 'users', uid, 'conversations', id, 'messages')
+    collection(
+      getFirebase().db,
+      'users',
+      uid,
+      'conversations',
+      id,
+      'messages',
+    ),
   );
 
-  await Promise.all(msgs.docs.map((item) => deleteDoc(item.ref)));
+  await Promise.all(
+    msgs.docs.map((item) => deleteDoc(item.ref)),
+  );
 
-  await deleteDoc(doc(getFirebase().db, 'users', uid, 'conversations', id));
+  await deleteDoc(
+    doc(
+      getFirebase().db,
+      'users',
+      uid,
+      'conversations',
+      id,
+    ),
+  );
 }
 
 export async function listConversations(uid: string) {
   const q = query(
-    collection(getFirebase().db, 'users', uid, 'conversations'),
+    collection(
+      getFirebase().db,
+      'users',
+      uid,
+      'conversations',
+    ),
     orderBy('updatedAt', 'desc'),
-    limit(100)
+    limit(100),
   );
 
   const snapshot = await getDocs(q);
 
-  return snapshot.docs.map((d) => ({
-    id: d.id,
-    ...d.data()
-  } as {
-    id: string;
-    title?: string;
-    createdAt?: unknown;
-    updatedAt?: unknown;
-  }));
+  return snapshot.docs.map(
+    (d) =>
+      ({
+        id: d.id,
+        ...d.data(),
+      }) as {
+        id: string;
+        title?: string;
+        createdAt?: unknown;
+        updatedAt?: unknown;
+      },
+  );
 }
 
 export async function addMessage(
@@ -165,27 +239,28 @@ export async function addMessage(
     role: 'user' | 'assistant';
     content: string;
     attachments?: unknown[];
-  }
+  },
 ) {
   const parent = doc(
     getFirebase().db,
     'users',
     uid,
     'conversations',
-    conversationId
+    conversationId,
   );
 
   await addDoc(collection(parent, 'messages'), {
     ...message,
-    createdAt: serverTimestamp()
+    createdAt: serverTimestamp(),
   });
 
   const update: Record<string, unknown> = {
-    updatedAt: serverTimestamp()
+    updatedAt: serverTimestamp(),
   };
 
   if (message.role === 'user') {
-    update.title = message.content.slice(0, 52) || 'New conversation';
+    update.title =
+      message.content.slice(0, 52) || 'New conversation';
   }
 
   await setDoc(parent, update, { merge: true });
@@ -200,8 +275,8 @@ export function watchMessages(
       role: 'user' | 'assistant';
       content: string;
       attachments?: unknown[];
-    }>
-  ) => void
+    }>,
+  ) => void,
 ) {
   const q = query(
     collection(
@@ -210,23 +285,26 @@ export function watchMessages(
       uid,
       'conversations',
       conversationId,
-      'messages'
+      'messages',
     ),
-    orderBy('createdAt', 'asc')
+    orderBy('createdAt', 'asc'),
   );
 
   return onSnapshot(q, (snapshot) =>
     callback(
-      snapshot.docs.map((d) => ({
-        id: d.id,
-        ...d.data()
-      } as {
-        id: string;
-        role: 'user' | 'assistant';
-        content: string;
-        attachments?: unknown[];
-      }))
-    )
+      snapshot.docs.map(
+        (d) =>
+          ({
+            id: d.id,
+            ...d.data(),
+          }) as {
+            id: string;
+            role: 'user' | 'assistant';
+            content: string;
+            attachments?: unknown[];
+          },
+      ),
+    ),
   );
 }
 
@@ -236,45 +314,66 @@ export async function saveEncryptedVault(
     ciphertext: string;
     salt: string;
     iv: string;
-  }
+  },
 ) {
   await setDoc(
-    doc(getFirebase().db, 'users', uid, 'private', 'geminiVault'),
+    doc(
+      getFirebase().db,
+      'users',
+      uid,
+      'private',
+      'geminiVault',
+    ),
     {
       ...payload,
       algorithm: 'AES-GCM/PBKDF2-SHA256',
-      updatedAt: serverTimestamp()
-    }
+      updatedAt: serverTimestamp(),
+    },
   );
 }
 
 export async function readEncryptedVault(uid: string) {
   const snapshot = await getDoc(
-    doc(getFirebase().db, 'users', uid, 'private', 'geminiVault')
+    doc(
+      getFirebase().db,
+      'users',
+      uid,
+      'private',
+      'geminiVault',
+    ),
   );
 
   return snapshot.exists()
-    ? snapshot.data() as {
+    ? (snapshot.data() as {
         ciphertext: string;
         salt: string;
         iv: string;
-      }
+      })
     : null;
 }
 
 export async function deleteEncryptedVault(uid: string) {
   await deleteDoc(
-    doc(getFirebase().db, 'users', uid, 'private', 'geminiVault')
+    doc(
+      getFirebase().db,
+      'users',
+      uid,
+      'private',
+      'geminiVault',
+    ),
   );
 }
 
-export async function saveMemory(uid: string, content: string) {
+export async function saveMemory(
+  uid: string,
+  content: string,
+) {
   return addDoc(
     collection(getFirebase().db, 'users', uid, 'memories'),
     {
       content,
-      createdAt: serverTimestamp()
-    }
+      createdAt: serverTimestamp(),
+    },
   );
 }
 
@@ -282,19 +381,28 @@ export async function listMemories(uid: string) {
   const q = query(
     collection(getFirebase().db, 'users', uid, 'memories'),
     orderBy('createdAt', 'desc'),
-    limit(100)
+    limit(100),
   );
 
   const snapshot = await getDocs(q);
 
   return snapshot.docs.map((d) => ({
     id: d.id,
-    content: String(d.data().content || '')
+    content: String(d.data().content || ''),
   }));
 }
 
-export async function deleteMemory(uid: string, id: string) {
+export async function deleteMemory(
+  uid: string,
+  id: string,
+) {
   await deleteDoc(
-    doc(getFirebase().db, 'users', uid, 'memories', id)
+    doc(
+      getFirebase().db,
+      'users',
+      uid,
+      'memories',
+      id,
+    ),
   );
 }
