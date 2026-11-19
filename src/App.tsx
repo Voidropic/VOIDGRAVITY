@@ -104,23 +104,49 @@ export default function App() {
   }, []);
   const dismissNotice = (id: number) => setNotices((current) => current.filter((n) => n.id !== id));
 
-    useEffect(() => {
-    let cancelled = false;
+  useEffect(() => {
     let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+    let redirectResolved = false;
+    let authStateReceived = false;
+    let pendingUser: User | null = null;
+    let fallbackTimer: number | undefined;
+
+    const finishAuth = (nextUser: User | null) => {
+      if (cancelled) return;
+      setUser(nextUser);
+      setAuthLoading(false);
+    };
 
     if (!isFirebaseReady()) {
       setAuthLoading(false);
       return;
     }
 
-    // Pasang listener terlebih dahulu agar perubahan status login
-    // tetap terdeteksi setelah Google mengembalikan browser ke aplikasi.
+    /*
+     * IMPORTANT:
+     * Firebase can briefly emit `null` while a Google redirect is
+     * being restored. If we immediately set authLoading=false here,
+     * the login screen can flash/reappear even though the Google
+     * session is valid.
+     *
+     * Keep the app in the loading state until both:
+     * 1. Firebase has reported an auth state, and
+     * 2. The Google redirect result has been resolved.
+     */
     try {
       unsubscribe = watchAuth((nextUser) => {
         if (cancelled) return;
 
-        setUser(nextUser);
-        setAuthLoading(false);
+        authStateReceived = true;
+        pendingUser = nextUser;
+
+        if (!redirectResolved) {
+          if (nextUser) setUser(nextUser);
+          return;
+        }
+
+        finishAuth(nextUser);
       });
     } catch (error) {
       setAuthLoading(false);
@@ -133,18 +159,35 @@ export default function App() {
       return;
     }
 
-    // Pulihkan hasil Google redirect.
     void resolveGoogleRedirect()
       .then((result) => {
         if (cancelled) return;
 
+        redirectResolved = true;
+
         if (result?.user) {
-          setUser(result.user);
-          setAuthLoading(false);
+          pendingUser = result.user;
+          finishAuth(result.user);
+          return;
+        }
+
+        /*
+         * If onAuthStateChanged already fired, use its latest value.
+         * Otherwise let the auth listener finish initialization when
+         * Firebase delivers its first state.
+         */
+        if (authStateReceived) {
+          finishAuth(pendingUser);
+        } else {
+          fallbackTimer = window.setTimeout(() => {
+            if (!cancelled) finishAuth(pendingUser);
+          }, 3000);
         }
       })
       .catch((error) => {
         if (cancelled) return;
+
+        redirectResolved = true;
 
         notify(
           error instanceof Error
@@ -152,10 +195,24 @@ export default function App() {
             : 'Google redirect resolution failed.',
           'error'
         );
+
+        /*
+         * Do not trap the app forever if redirect resolution fails.
+         * Firebase's auth-state listener is still allowed to provide
+         * the authenticated user.
+         */
+        if (authStateReceived) {
+          finishAuth(pendingUser);
+        } else {
+          fallbackTimer = window.setTimeout(() => {
+            if (!cancelled) finishAuth(pendingUser);
+          }, 3000);
+        }
       });
 
     return () => {
       cancelled = true;
+      if (fallbackTimer !== undefined) window.clearTimeout(fallbackTimer);
       unsubscribe?.();
     };
   }, [notify]);
