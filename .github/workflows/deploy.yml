@@ -31,27 +31,13 @@ jobs:
 
     steps:
 
-      # ============================================================
-      # CHECKOUT
-      # ============================================================
-
       - name: Checkout
         uses: actions/checkout@v4
-
-
-      # ============================================================
-      # SUPABASE CLI
-      # ============================================================
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v3
         with:
           version: latest
-
-
-      # ============================================================
-      # VALIDATE CONFIGURATION
-      # ============================================================
 
       - name: Validate Supabase configuration
         shell: bash
@@ -87,11 +73,6 @@ jobs:
 
           echo "Supabase configuration detected successfully."
 
-
-      # ============================================================
-      # SET FIREBASE PROJECT ID IN SUPABASE
-      # ============================================================
-
       - name: Set Firebase project ID secret
         shell: bash
         run: |
@@ -99,12 +80,8 @@ jobs:
 
           supabase secrets set \
             --project-ref "$SUPABASE_PROJECT_REF" \
+            --yes \
             "FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID"
-
-
-      # ============================================================
-      # DEPLOY GEMINI PROXY
-      # ============================================================
 
       - name: Deploy Gemini proxy
         shell: bash
@@ -115,65 +92,30 @@ jobs:
             --project-ref "$SUPABASE_PROJECT_REF" \
             --no-verify-jwt
 
-
-      # ============================================================
-      # NODE.JS
-      # ============================================================
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-
-      # ============================================================
-      # INSTALL FRONTEND DEPENDENCIES
-      # ============================================================
-
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-
-
-      # ============================================================
-      # BUILD FRONTEND
-      # ============================================================
 
       - name: Build frontend
         run: npm run build
         env:
           VITE_BASE: ${{ vars.VITE_BASE || format('/{0}/', github.event.repository.name) }}
           VITE_FIREBASE_CONFIG: ${{ vars.FIREBASE_WEB_CONFIG }}
-
-          # SUPABASE_URL IS A SECRET IN YOUR SETUP
           VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-
-          # This one remains a variable because it is the public/publishable key
           VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
-
           VITE_SUPABASE_BUCKET: ${{ vars.SUPABASE_BUCKET || 'void-files' }}
-
-
-      # ============================================================
-      # GITHUB PAGES
-      # ============================================================
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
-
-
-      # ============================================================
-      # UPLOAD BUILD
-      # ============================================================
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
-
-
-      # ============================================================
-      # DEPLOY
-      # ============================================================
 
       - name: Deploy to GitHub Pages
         id: pages-deploy
