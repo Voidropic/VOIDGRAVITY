@@ -1,0 +1,31 @@
+name: Deploy VOIDGRAVITY Gemini Edge Function
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/deploy-supabase.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v3
+        with:
+          version: latest
+      - name: Check required settings
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN" || (echo 'Missing SUPABASE_ACCESS_TOKEN secret' && exit 1)
+          test -n "$SUPABASE_PROJECT_REF" || (echo 'Missing SUPABASE_PROJECT_REF repository variable' && exit 1)
+          test -n "$FIREBASE_PROJECT_ID" || (echo 'Missing FIREBASE_PROJECT_ID secret' && exit 1)
+      - name: Set Edge Function secret
+        run: supabase secrets set "FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID" --remote="$SUPABASE_PROJECT_REF" --yes
+      - name: Deploy Gemini proxy
+        run: supabase functions deploy gemini-proxy --remote="$SUPABASE_PROJECT_REF" --no-verify-jwt --use-api --yes
