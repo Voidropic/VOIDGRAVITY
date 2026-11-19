@@ -104,18 +104,60 @@ export default function App() {
   }, []);
   const dismissNotice = (id: number) => setNotices((current) => current.filter((n) => n.id !== id));
 
-  useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
+    useEffect(() => {
     let cancelled = false;
-    const boot = async () => {
-      if (!isFirebaseReady()) { setAuthLoading(false); return; }
-      try {
-        await resolveGoogleRedirect();
-        unsubscribe = watchAuth((nextUser) => { if (!cancelled) { setUser(nextUser); setAuthLoading(false); } });
-      } catch (error) { setAuthLoading(false); notify(error instanceof Error ? error.message : 'Authentication initialization failed.', 'error'); }
+    let unsubscribe: (() => void) | undefined;
+
+    if (!isFirebaseReady()) {
+      setAuthLoading(false);
+      return;
+    }
+
+    // Pasang listener terlebih dahulu agar perubahan status login
+    // tetap terdeteksi setelah Google mengembalikan browser ke aplikasi.
+    try {
+      unsubscribe = watchAuth((nextUser) => {
+        if (cancelled) return;
+
+        setUser(nextUser);
+        setAuthLoading(false);
+      });
+    } catch (error) {
+      setAuthLoading(false);
+      notify(
+        error instanceof Error
+          ? error.message
+          : 'Authentication initialization failed.',
+        'error'
+      );
+      return;
+    }
+
+    // Pulihkan hasil Google redirect.
+    void resolveGoogleRedirect()
+      .then((result) => {
+        if (cancelled) return;
+
+        if (result?.user) {
+          setUser(result.user);
+          setAuthLoading(false);
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+
+        notify(
+          error instanceof Error
+            ? error.message
+            : 'Google redirect resolution failed.',
+          'error'
+        );
+      });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
     };
-    void boot();
-    return () => { cancelled = true; unsubscribe?.(); };
   }, [notify]);
 
   useEffect(() => {
